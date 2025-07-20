@@ -1,30 +1,19 @@
-FROM python:3.11-slim
+# Use the official Python image as a base
+FROM python:3.9-slim
 
+# Set the working directory in the container
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        postgresql-client \
-        build-essential \
-        libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Copy the requirements file and install dependencies
+COPY requirements.txt /app/
 
-# Install Python dependencies
-COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project
-COPY . .
+# Copy the rest of the application
+COPY . /app/
 
-# Create media and static directories
-RUN mkdir -p media staticfiles
-
-# Collect static files
-RUN python manage.py collectstatic --noinput
-
-# Expose port
+# Expose the port the app runs on
 EXPOSE 8000
 
-# Run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "shopfusion_backend.wsgi:application"]
+# Run the Django application
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
