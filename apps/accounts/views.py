@@ -1,0 +1,300 @@
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import login, logout
+from django.utils import timezone
+from datetime import timedelta
+import random
+import string
+import uuid
+
+from .models import User, UserAddress, UserPaymentMethod, OTPToken
+from .serializers import (
+    UserRegistrationSerializer, UserLoginSerializer, UserSerializer,
+    UserAddressSerializer, UserPaymentMethodSerializer,
+    OTPVerificationSerializer, ForgotPasswordSerializer, ResetPasswordSerializer
+)
+
+
+class UserRegistrationView(generics.CreateAPIView):
+    queryset = User.objects.all()
+    serializer_class = UserRegistrationSerializer
+    permission_classes = [AllowAny]
+
+    def create(self, request, *args, **kwargs):
+        print("User registration initiated")
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            print("Serializer errors:", serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user = serializer.save()
+        print(f"User created: {user.email}")
+
+        otp_token = self.generate_otp(user, 'registration')
+        temp_token = str(uuid.uuid4())
+
+        request.session[f'temp_registration_{temp_token}'] = {
+            'user_id': str(user.id),
+            'expires_at': (timezone.now() + timedelta(minutes=5)).isoformat()
+        }
+        print(f"Stored session token: temp_registration_{temp_token}")
+
+        return Response({
+            'message': 'User registered successfully. Please verify with OTP.',
+            'requires_otp': True,
+            'temp_token': temp_token
+        }, status=status.HTTP_201_CREATED)
+
+    def generate_otp(self, user, otp_type):
+        print(f"Generating OTP for {user.email} of type {otp_type}")
+        OTPToken.objects.filter(user=user, otp_type=otp_type, is_used=False).delete()
+        otp = ''.join(random.choices(string.digits, k=6))
+
+        otp_token = OTPToken.objects.create(
+            user=user,
+            token=otp,
+            otp_type=otp_type,
+            expires_at=timezone.now() + timedelta(minutes=5)
+        )
+
+        print(f"OTP for {user.email}: {otp}")
+        return otp_token
+
+
+class UserLoginView(generics.GenericAPIView):
+    serializer_class = UserLoginSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        print("Login request received")
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            print("Serializer errors:", serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.validated_data['user']
+        print(f"Login successful for user: {user.email}")
+
+        token, created = Token.objects.get_or_create(user=user)
+
+        login(request, user)
+        user.last_login = timezone.now()
+        user.save()
+
+        return Response({
+            'user': UserSerializer(user).data,
+            'token': token.key,
+            'message': 'Login successful'
+        })
+
+
+class UserLogoutView(generics.GenericAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        print(f"Logout request for user: {request.user.email}")
+        try:
+            request.user.auth_token.delete()
+            print("Token deleted")
+        except:
+            print("No token to delete")
+
+        logout(request)
+        return Response({'message': 'Logout successful'})
+
+
+class UserProfileView(generics.RetrieveUpdateAPIView):
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        print(f"Fetching profile for user: {self.request.user.email}")
+        return self.request.user
+
+
+class OTPVerificationView(generics.GenericAPIView):
+    serializer_class = OTPVerificationSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        print("OTP verification request received")
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        temp_token = serializer.validated_data['temp_token']
+        otp = serializer.validated_data['otp']
+        otp_type = serializer.validated_data['type']
+        print(f"Verifying OTP: {otp} for type: {otp_type}")
+
+        session_key = f'temp_registration_{temp_token}' if otp_type == 'registration' else f'temp_forgot_{temp_token}'
+        session_data = request.session.get(session_key)
+
+        if not session_data:
+            print("Invalid or expired session token")
+            return Response({'error': 'Invalid or expired token'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(id=session_data['user_id'])
+            print(f"User found: {user.email}")
+        except User.DoesNotExist:
+            print("User not found from session data")
+            return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            otp_token = OTPToken.objects.get(
+                user=user,
+                token=otp,
+                otp_type=otp_type.replace('-', '_'),
+                is_used=False
+            )
+        except OTPToken.DoesNotExist:
+            print("Invalid OTP provided")
+            return Response({'error': 'Invalid OTP'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not otp_token.is_valid():
+            print("OTP expired")
+            return Response({'error': 'OTP has expired'}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp_token.is_used = True
+        otp_token.save()
+        print("OTP verified and marked as used")
+
+        if otp_type == 'registration':
+            user.is_verified = True
+            user.save()
+            token, created = Token.objects.get_or_create(user=user)
+            login(request, user)
+            del request.session[session_key]
+            print("User account verified and logged in")
+
+            return Response({
+                'user': UserSerializer(user).data,
+                'token': token.key,
+                'message': 'Account verified successfully'
+            })
+        else:
+            print("OTP verified for forgot password flow")
+            return Response({'message': 'OTP verified successfully'})
+
+
+class ForgotPasswordView(generics.GenericAPIView):
+    serializer_class = ForgotPasswordSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        print("Forgot password request received")
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            print("Serializer errors:", serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        identifier = serializer.validated_data['email_or_phone']
+        print(f"Identifier received: {identifier}")
+
+        user = None
+        if '@' in identifier:
+            try:
+                user = User.objects.get(email=identifier)
+            except User.DoesNotExist:
+                pass
+        else:
+            try:
+                user = User.objects.get(phone=identifier)
+            except User.DoesNotExist:
+                pass
+
+        if not user:
+            print("User not found for forgot password")
+            return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp_token = UserRegistrationView().generate_otp(user, 'forgot_password')
+        temp_token = str(uuid.uuid4())
+        request.session[f'temp_forgot_{temp_token}'] = {
+            'user_id': str(user.id),
+            'expires_at': (timezone.now() + timedelta(minutes=5)).isoformat()
+        }
+        print(f"Forgot password temp token created: {temp_token}")
+
+        return Response({
+            'message': 'OTP sent successfully',
+            'requires_otp': True,
+            'temp_token': temp_token
+        })
+
+
+class ResetPasswordView(generics.GenericAPIView):
+    serializer_class = ResetPasswordSerializer
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        print("Reset password request received")
+        print(request.data)
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            print("Serializer errors:", serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.is_valid(raise_exception=True)
+
+        temp_token = serializer.validated_data['temp_token']
+        new_password = serializer.validated_data['new_password']
+        session_key = f'temp_forgot_{temp_token}'
+
+        session_data = request.session.get(session_key)
+        if not session_data:
+            print("Invalid or expired token for reset password")
+            return Response({'error': 'Invalid or expired token'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(id=session_data['user_id'])
+            print(f"User found for reset password: {user.email}")
+        except User.DoesNotExist:
+            print("User not found for reset password")
+            return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save()
+        del request.session[session_key]
+        print("Password reset successfully")
+
+        return Response({'message': 'Password reset successfully'})
+
+
+class UserAddressViewSet(viewsets.ModelViewSet):
+    serializer_class = UserAddressSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        print(f"Fetching addresses for user: {self.request.user.email}")
+        return UserAddress.objects.filter(user=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def set_default(self, request, pk=None):
+        print(f"Setting default address: {pk} for user: {request.user.email}")
+        address = self.get_object()
+        UserAddress.objects.filter(user=request.user).update(is_default=False)
+        address.is_default = True
+        address.save()
+        return Response({'message': 'Default address updated'})
+
+
+class UserPaymentMethodViewSet(viewsets.ModelViewSet):
+    serializer_class = UserPaymentMethodSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        print(f"Fetching payment methods for user: {self.request.user.email}")
+        return UserPaymentMethod.objects.filter(user=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def set_default(self, request, pk=None):
+        print(f"Setting default payment method: {pk} for user: {request.user.email}")
+        payment_method = self.get_object()
+        UserPaymentMethod.objects.filter(user=request.user).update(is_default=False)
+        payment_method.is_default = True
+        payment_method.save()
+        return Response({'message': 'Default payment method updated'})
