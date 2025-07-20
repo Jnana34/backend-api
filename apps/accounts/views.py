@@ -3,19 +3,43 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authtoken.models import Token
+from django.middleware.csrf import get_token
 from django.contrib.auth import login, logout
 from django.utils import timezone
 from datetime import timedelta
+from django.core.mail import send_mail
 import random
 import string
 import uuid
-
+from rest_framework.views import APIView
 from .models import User, UserAddress, UserPaymentMethod, OTPToken
 from .serializers import (
     UserRegistrationSerializer, UserLoginSerializer, UserSerializer,
     UserAddressSerializer, UserPaymentMethodSerializer,
     OTPVerificationSerializer, ForgotPasswordSerializer, ResetPasswordSerializer
 )
+from rest_framework.authentication import SessionAuthentication, BasicAuthentication
+
+class CsrfTokenView(APIView):
+    """GET /api/auth/csrf/"""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        token = get_token(request)
+        return Response({'csrfToken': token})
+
+
+class CurrentUserView(APIView):
+    """GET /api/auth/user/"""
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [SessionAuthentication, BasicAuthentication]
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            'user': UserSerializer(user).data
+        })
+
 
 
 class UserRegistrationView(generics.CreateAPIView):
@@ -61,6 +85,13 @@ class UserRegistrationView(generics.CreateAPIView):
         )
 
         print(f"OTP for {user.email}: {otp}")
+
+        send_mail(
+        subject="Your OTP Verification Code",
+        message=f"Your OTP is {otp}. It will expire in 10 minutes.",
+        from_email=None,  # uses DEFAULT_FROM_EMAIL
+        recipient_list=[user.email],
+        fail_silently=False,)
         return otp_token
 
 
