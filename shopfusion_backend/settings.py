@@ -83,7 +83,7 @@ DATABASES = {
         'USER': config('DB_USER', default='postgres'),
         'PASSWORD': config('DB_PASSWORD', default='Jnana34'),
         'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5433'),
+        'PORT': config('DB_PORT', default='5432'),
     }
 }
 
@@ -130,7 +130,7 @@ REST_FRAMEWORK = {
 
 # CORS Configuration
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:8080",
+    "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -160,5 +160,9 @@ EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
 
 # OTP Configuration
-OTP_EXPIRY_TIME = 300  # 5 minutes
-OTP_LENGTH = 6
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 465
+EMAIL_USE_SSL = True
+EMAIL_HOST_USER = 'jnanaranjan27@gmail.com'
+EMAIL_HOST_PASSWORD = 'zbuv ogxf xylw sdzb'
