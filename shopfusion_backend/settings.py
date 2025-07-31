@@ -17,9 +17,6 @@ DJANGO_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.sites',
 ]
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:8080',
-]
 
 THIRD_PARTY_APPS = [
     'rest_framework',
@@ -38,6 +35,7 @@ LOCAL_APPS = [
     'apps.products',
     'apps.orders',
     'apps.core',
+    'apps.cart',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -47,13 +45,14 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',  # must be before AccountMiddleware
-    'allauth.account.middleware.AccountMiddleware',              # <-- add this line
+    # ❌ Removed: 'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'allauth.account.middleware.AccountMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # ✅ Optional: Uncomment to disable CSRF globally (not recommended unless API-only)
+    # 'shopfusion_backend.middleware.DisableCSRFMiddleware',
 ]
-
 
 ROOT_URLCONF = 'shopfusion_backend.urls'
 
@@ -75,7 +74,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'shopfusion_backend.wsgi.application'
 
-# Database
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -107,13 +105,12 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Custom User Model
 AUTH_USER_MODEL = 'accounts.User'
 
-# REST Framework Configuration
+# ✅ REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
+        'shopfusion_backend.auth.CsrfExemptSessionAuthentication',  # ✅ Custom class
         'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
@@ -128,41 +125,32 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 20,
 }
 
-# CORS Configuration
+# ✅ CORS
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
-
 CORS_ALLOW_CREDENTIALS = True
 
-# Session Configuration for HTTP-only cookies
+# ✅ Removed CSRF cookie settings (not needed)
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_SAMESITE = 'Lax'
-CSRF_COOKIE_HTTPONLY = True
-CSRF_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SAMESITE = 'Lax'
+# ❌ Removed CSRF cookie options
 
-# Django Allauth Configuration
 SITE_ID = 1
 ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_USERNAME_REQUIRED = False
 ACCOUNT_AUTHENTICATION_METHOD = 'email'
 ACCOUNT_EMAIL_VERIFICATION = 'optional'
 
-# Email Configuration (for development)
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-
-# Redis Configuration (for OTP storage)
-REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
-
-# OTP Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 465
 EMAIL_USE_SSL = True
 EMAIL_HOST_USER = 'jnanaranjan27@gmail.com'
 EMAIL_HOST_PASSWORD = 'zbuv ogxf xylw sdzb'
+
+REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')

@@ -42,57 +42,51 @@ class CurrentUserView(APIView):
 
 
 
-class UserRegistrationView(generics.CreateAPIView):
-    queryset = User.objects.all()
-    serializer_class = UserRegistrationSerializer
+class UserRegistrationView(APIView):
     permission_classes = [AllowAny]
+    serializer_class = UserRegistrationSerializer
 
-    def create(self, request, *args, **kwargs):
+    def post(self, request, *args, **kwargs):
         print("User registration initiated")
-        serializer = self.get_serializer(data=request.data)
+        serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
             print("Serializer errors:", serializer.errors)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        user = serializer.save()
-        print(f"User created: {user.email}")
+        email = serializer.validated_data['email']
+        if User.objects.filter(email=email).exists():
+            return Response({'email': 'This email is already registered.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        otp_token = self.generate_otp(user, 'registration')
         temp_token = str(uuid.uuid4())
-
-        request.session[f'temp_registration_{temp_token}'] = {
-            'user_id': str(user.id),
-            'expires_at': (timezone.now() + timedelta(minutes=5)).isoformat()
-        }
-        print(f"Stored session token: temp_registration_{temp_token}")
+        self.generate_otp(request, temp_token, serializer.validated_data)
 
         return Response({
-            'message': 'User registered successfully. Please verify with OTP.',
-            'requires_otp': True,
-            'temp_token': temp_token
-        }, status=status.HTTP_201_CREATED)
+            'message': 'OTP sent to your email. Please verify to complete registration.',
+            'temp_token': temp_token,
+            'requires_otp': True
+        }, status=status.HTTP_200_OK)
 
-    def generate_otp(self, user, otp_type):
-        print(f"Generating OTP for {user.email} of type {otp_type}")
-        OTPToken.objects.filter(user=user, otp_type=otp_type, is_used=False).delete()
+    def generate_otp(self, request, temp_token, user_data):
         otp = ''.join(random.choices(string.digits, k=6))
 
-        otp_token = OTPToken.objects.create(
-            user=user,
-            token=otp,
-            otp_type=otp_type,
-            expires_at=timezone.now() + timedelta(minutes=5)
+        # Store OTP and user data in session
+        request.session[f'temp_registration_{temp_token}'] = {
+            'data': user_data,
+            'otp': otp,
+            'expires_at': (timezone.now() + timedelta(minutes=5)).isoformat()
+        }
+
+        # Log and send OTP
+        print(f"OTP for {user_data['email']}: {otp}")
+        send_mail(
+            subject="Your OTP Verification Code",
+            message=f"Your OTP is {otp}. It will expire in 5 minutes.",
+            from_email=None,  # uses DEFAULT_FROM_EMAIL
+            recipient_list=[user_data['email']],
+            fail_silently=False,
         )
 
-        print(f"OTP for {user.email}: {otp}")
 
-        send_mail(
-        subject="Your OTP Verification Code",
-        message=f"Your OTP is {otp}. It will expire in 10 minutes.",
-        from_email=None,  # uses DEFAULT_FROM_EMAIL
-        recipient_list=[user.email],
-        fail_silently=False,)
-        return otp_token
 
 
 class UserLoginView(generics.GenericAPIView):
@@ -147,69 +141,64 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         return self.request.user
 
 
-class OTPVerificationView(generics.GenericAPIView):
+class OTPVerificationView(APIView):
+    def generate_unique_username(self,first_name, last_name):
+        base = f"{first_name.lower()}{last_name.lower()}"
+        while True:
+            suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+            username = f"{base}{suffix}"
+            if not User.objects.filter(username=username).exists():
+                return username
     serializer_class = OTPVerificationSerializer
     permission_classes = [AllowAny]
 
     def post(self, request):
-        print("OTP verification request received")
-        serializer = self.get_serializer(data=request.data)
+        print("otp verification request received")
+        serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         temp_token = serializer.validated_data['temp_token']
         otp = serializer.validated_data['otp']
         otp_type = serializer.validated_data['type']
-        print(f"Verifying OTP: {otp} for type: {otp_type}")
+        print("otp:",otp,"type",otp_type)
 
         session_key = f'temp_registration_{temp_token}' if otp_type == 'registration' else f'temp_forgot_{temp_token}'
         session_data = request.session.get(session_key)
 
         if not session_data:
-            print("Invalid or expired session token")
             return Response({'error': 'Invalid or expired token'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            user = User.objects.get(id=session_data['user_id'])
-            print(f"User found: {user.email}")
-        except User.DoesNotExist:
-            print("User not found from session data")
-            return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            otp_token = OTPToken.objects.get(
-                user=user,
-                token=otp,
-                otp_type=otp_type.replace('-', '_'),
-                is_used=False
-            )
-        except OTPToken.DoesNotExist:
-            print("Invalid OTP provided")
+        if session_data['otp'] != otp:
             return Response({'error': 'Invalid OTP'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not otp_token.is_valid():
-            print("OTP expired")
-            return Response({'error': 'OTP has expired'}, status=status.HTTP_400_BAD_REQUEST)
-
-        otp_token.is_used = True
-        otp_token.save()
-        print("OTP verified and marked as used")
-
         if otp_type == 'registration':
+            user_data = session_data['data']
+            first_name = user_data.get('first_name', '')
+            last_name = user_data.get('last_name', '')
+            username = self.generate_unique_username(first_name, last_name)
+            print("Creating user with:", user_data)
+            user = User.objects.create_user(
+            username=username,
+            email=user_data['email'],
+            password=user_data['password']
+            )
             user.is_verified = True
             user.save()
-            token, created = Token.objects.get_or_create(user=user)
+            token, _ = Token.objects.get_or_create(user=user)
             login(request, user)
             del request.session[session_key]
-            print("User account verified and logged in")
 
             return Response({
                 'user': UserSerializer(user).data,
                 'token': token.key,
-                'message': 'Account verified successfully'
+                'message': 'Account verified and created successfully'
             })
-        else:
-            print("OTP verified for forgot password flow")
+
+        elif otp_type == 'forgot-password':
+            # Implement forgot password OTP verification logic
+            # Only delete OTP session here; reset happens in ResetPasswordView
             return Response({'message': 'OTP verified successfully'})
+
 
 
 class ForgotPasswordView(generics.GenericAPIView):
@@ -220,9 +209,6 @@ class ForgotPasswordView(generics.GenericAPIView):
         print("Forgot password request received")
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if not serializer.is_valid():
-            print("Serializer errors:", serializer.errors)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         identifier = serializer.validated_data['email_or_phone']
         print(f"Identifier received: {identifier}")
@@ -243,19 +229,32 @@ class ForgotPasswordView(generics.GenericAPIView):
             print("User not found for forgot password")
             return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
 
-        otp_token = UserRegistrationView().generate_otp(user, 'forgot_password')
         temp_token = str(uuid.uuid4())
+        otp = ''.join(random.choices(string.digits, k=6))
+
+        # ✅ Store OTP and user ID in session
         request.session[f'temp_forgot_{temp_token}'] = {
+            'otp': otp,
             'user_id': str(user.id),
             'expires_at': (timezone.now() + timedelta(minutes=5)).isoformat()
         }
-        print(f"Forgot password temp token created: {temp_token}")
 
+        print(f"Forgot password OTP for {user.email}: {otp}")
+        send_mail(
+            subject="Your OTP for Password Reset",
+            message=f"Your OTP is {otp}. It will expire in 5 minutes.",
+            from_email=None,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+
+        print(f"Forgot password temp token created: {temp_token}")
         return Response({
             'message': 'OTP sent successfully',
-            'requires_otp': True,
-            'temp_token': temp_token
-        })
+            'temp_token': temp_token,
+            'requires_otp': True
+        }, status=status.HTTP_200_OK)
+        
 
 
 class ResetPasswordView(generics.GenericAPIView):
