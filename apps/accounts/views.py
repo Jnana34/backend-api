@@ -87,6 +87,35 @@ class UserRegistrationView(APIView):
         )
 
 
+        print(f"Stored session token: temp_registration_{temp_token}")
+
+        return Response({
+            'message': 'User registered successfully. Please verify with OTP.',
+            'requires_otp': True,
+            'temp_token': temp_token
+        }, status=status.HTTP_201_CREATED)
+
+    def generate_otp(self, user, otp_type):
+        print(f"Generating OTP for {user.email} of type {otp_type}")
+        OTPToken.objects.filter(user=user, otp_type=otp_type, is_used=False).delete()
+        otp = ''.join(random.choices(string.digits, k=6))
+
+        otp_token = OTPToken.objects.create(
+            user=user,
+            token=otp,
+            otp_type=otp_type,
+            expires_at=timezone.now() + timedelta(minutes=5)
+        )
+
+        print(f"OTP for {user.email}: {otp}")
+
+        send_mail(
+        subject="Your OTP Verification Code",
+        message=f"Your OTP is {otp}. It will expire in 10 minutes.",
+        from_email=None,  # uses DEFAULT_FROM_EMAIL
+        recipient_list=[user.email],
+        fail_silently=False,)
+        return otp_token
 
 
 class UserLoginView(generics.GenericAPIView):
