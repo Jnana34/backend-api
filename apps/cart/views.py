@@ -7,6 +7,7 @@ from apps.products.models import Product
 from .serializers import CartItemSerializer, AddToCartSerializer, UpdateCartItemSerializer
 from django.shortcuts import get_object_or_404
 from rest_framework.parsers import JSONParser
+import razorpay
 
 class CartView(APIView):
     permission_classes = [IsAuthenticated]
@@ -69,16 +70,21 @@ class AddToCartView(APIView):
 class UpdateCartItemView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def patch(self, request, item_id):
-        print(f"[DEBUG] User {request.user} updating cart item {item_id} with data: {request.data}")
-        serializer = UpdateCartItemSerializer(data=request.data)
+    def patch(self, request):
+        print(f"[DEBUG] Raw request data: {request.data}")
+
+        data = request.data.get("data", {})
+        print(f"[DEBUG] Extracted data: {data}")
+
+        serializer = UpdateCartItemSerializer(data=data)
         serializer.is_valid(raise_exception=True)
         print(f"[DEBUG] UpdateCartItemSerializer validated data: {serializer.validated_data}")
 
         cart = get_object_or_404(Cart, user=request.user)
         print(f"[DEBUG] User's cart found: {cart.id}")
 
-        item = get_object_or_404(CartItem, id=item_id, cart=cart)
+        product_id = serializer.validated_data["product_id"]
+        item = get_object_or_404(CartItem, product_id=product_id, cart=cart)
         print(f"[DEBUG] CartItem found: {item.id} with current quantity {item.quantity}")
 
         item.quantity = serializer.validated_data["quantity"]
@@ -87,6 +93,7 @@ class UpdateCartItemView(APIView):
         print("[DEBUG] CartItem updated successfully")
 
         return Response({"detail": "Cart item updated"}, status=status.HTTP_200_OK)
+
 
 
 class RemoveCartItemView(APIView):
@@ -113,3 +120,31 @@ class RemoveCartItemView(APIView):
 
         print(f"[DEBUG] Marked CartItem {item.id} as removed (is_removed=True)")
         return Response({"detail": "Item marked as removed"}, status=status.HTTP_204_NO_CONTENT)
+    
+class CreateRazorpayOrderView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        print("[DEBUG] Raw request data:", request.data)
+
+        # Handle nested payload
+        amount_data = request.data.get("data", {}).get("amount", {})
+        amount = amount_data.get("amount")
+
+        if amount is None:
+            return Response({"error": "Amount not provided"}, status=400)
+
+        try:
+            client = razorpay.Client(auth=("rzp_test_iyBzWTE9HK1xVS","3erTsDLgwmfbWwrNBORrY22F"))
+            print("authenticated")
+            order = client.order.create({
+                "amount": int(float(amount) * 100),  # convert to paise
+                "currency": "INR",
+                "payment_capture": 1
+            })
+
+            return Response(order)
+
+        except Exception as e:
+            print("[ERROR] Razorpay order creation failed:", str(e))
+            return Response({"error": "Payment initiation failed"}, status=500)

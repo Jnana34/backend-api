@@ -1,7 +1,8 @@
 from rest_framework import generics, viewsets, status, filters
+from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly,AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Avg
 from .models import Category, Product, ProductReview, Wishlist
@@ -154,3 +155,16 @@ class SearchView(generics.ListAPIView):
                 is_active=True
             ).distinct()
         return Product.objects.none()
+
+
+class FeaturedProductsAPIView(APIView):
+    permission_classes = [AllowAny]  # Allow non-auth users to access
+
+    def get(self, request):
+        featured_products = Product.objects.filter(is_featured=True, is_active=True)
+        serializer = ProductListSerializer(
+            featured_products, 
+            many=True, 
+            context={'request': request}
+        )
+        return Response(serializer.data)

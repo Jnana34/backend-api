@@ -322,24 +322,33 @@ class ResetPasswordView(generics.GenericAPIView):
 
         return Response({'message': 'Password reset successfully'})
 
-
-class UserAddressViewSet(viewsets.ModelViewSet):
-    serializer_class = UserAddressSerializer
+class AddressListView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        print(f"Fetching addresses for user: {self.request.user.email}")
-        return UserAddress.objects.filter(user=self.request.user)
+    def get(self, request):
+        addresses = UserAddress.objects.filter(user=request.user)
+        serializer = UserAddressSerializer(addresses, many=True)
+        return Response(serializer.data)
 
-    @action(detail=True, methods=['post'])
-    def set_default(self, request, pk=None):
-        print(f"Setting default address: {pk} for user: {request.user.email}")
-        address = self.get_object()
+
+class SetDefaultAddressView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        address_id = request.data.get("address_id")
+        if not address_id:
+            return Response({"error": "Address ID is required"}, status=400)
+
+        try:
+            address = UserAddress.objects.get(id=address_id, user=request.user)
+        except UserAddress.DoesNotExist:
+            return Response({"error": "Address not found"}, status=404)
+
         UserAddress.objects.filter(user=request.user).update(is_default=False)
         address.is_default = True
         address.save()
-        return Response({'message': 'Default address updated'})
 
+        return Response({"message": "Default address updated", "address_id": str(address.id)}, status=200)
 
 class UserPaymentMethodViewSet(viewsets.ModelViewSet):
     serializer_class = UserPaymentMethodSerializer

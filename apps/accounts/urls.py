@@ -3,13 +3,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     UserRegistrationView, UserLoginView, UserLogoutView, UserProfileView,
     OTPVerificationView, ForgotPasswordView, ResetPasswordView,
-    UserAddressViewSet, UserPaymentMethodViewSet,CsrfTokenView,CurrentUserView
+    AddressListView,SetDefaultAddressView, UserPaymentMethodViewSet,CsrfTokenView,CurrentUserView
 )
-
-router = DefaultRouter()
-router.register(r'addresses', UserAddressViewSet, basename='address')
-router.register(r'payment-methods', UserPaymentMethodViewSet, basename='payment-method')
-
 urlpatterns = [
     # Authentication endpoints
     path('register/', UserRegistrationView.as_view(), name='register'),
@@ -23,7 +18,9 @@ urlpatterns = [
     path('verify-otp/', OTPVerificationView.as_view(), name='verify-otp'),
     path('forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
     path('reset-password/', ResetPasswordView.as_view(), name='reset-password'),
+    #info
+    path('addresses/', AddressListView.as_view(), name='user-addresses'),
+    path('addresses/set-default/', SetDefaultAddressView.as_view(), name='set-default-address'),
     
     # User management
-    path('', include(router.urls)),
 ]

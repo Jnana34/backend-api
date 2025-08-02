@@ -51,4 +51,5 @@ class AddToCartSerializer(serializers.Serializer):
 
 
 class UpdateCartItemSerializer(serializers.Serializer):
+    product_id = serializers.UUIDField()
     quantity = serializers.IntegerField(min_value=1)
