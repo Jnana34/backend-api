@@ -144,3 +144,70 @@ class ResetPasswordSerializer(serializers.Serializer):
         if attrs['new_password'] != attrs['confirm_password']:
             raise serializers.ValidationError("Passwords do not match.")
         return attrs
+
+class UserAddressSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserAddress
+        fields = ['id', 'title', 'full_name', 'phone', 'street_address', 
+                 'city', 'state', 'postal_code', 'country', 'is_default']
+        read_only_fields = ['id']
+    
+    def create(self, validated_data):
+        validated_data['user'] = self.context['request'].user
+        
+        # If this is set as default, unset other defaults
+        if validated_data.get('is_default'):
+            UserAddress.objects.filter(user=validated_data['user']).update(is_default=False)
+        
+        return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        # If this is set as default, unset other defaults
+        if validated_data.get('is_default'):
+            UserAddress.objects.filter(user=instance.user).exclude(id=instance.id).update(is_default=False)
+        
+        return super().update(instance, validated_data)
+
+class UserPaymentMethodSerializer(serializers.ModelSerializer):
+    card_number_masked = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = UserPaymentMethod
+        fields = ['id', 'type', 'card_number', 'card_number_masked', 'card_holder_name', 
+                 'expiry_month', 'expiry_year', 'paypal_email', 'is_default']
+        read_only_fields = ['id', 'card_number_masked']
+        extra_kwargs = {
+            'card_number': {'write_only': True}
+        }
+    
+    def get_card_number_masked(self, obj):
+        if obj.card_number:
+            return f"**** **** **** {obj.card_number[-4:]}"
+        return None
+    
+    def create(self, validated_data):
+        validated_data['user'] = self.context['request'].user
+        
+        # If this is set as default, unset other defaults
+        if validated_data.get('is_default'):
+            UserPaymentMethod.objects.filter(user=validated_data['user']).update(is_default=False)
+        
+        return super().create(validated_data)
+
+class OTPVerificationSerializer(serializers.Serializer):
+    temp_token = serializers.CharField()
+    otp = serializers.CharField(max_length=6, min_length=6)
+    type = serializers.ChoiceField(choices=['registration', 'forgot-password'])
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    email_or_phone = serializers.CharField()
+
+class ResetPasswordSerializer(serializers.Serializer):
+    temp_token = serializers.CharField()
+    new_password = serializers.CharField(validators=[validate_password])
+    confirm_password = serializers.CharField()
+    
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['confirm_password']:
+            raise serializers.ValidationError("Passwords do not match.")
+        return attrs

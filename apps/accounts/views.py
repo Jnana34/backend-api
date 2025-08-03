@@ -42,51 +42,28 @@ class CurrentUserView(APIView):
 
 
 
-class UserRegistrationView(APIView):
-    permission_classes = [AllowAny]
+class UserRegistrationView(generics.CreateAPIView):
+    queryset = User.objects.all()
     serializer_class = UserRegistrationSerializer
+    permission_classes = [AllowAny]
 
-    def post(self, request, *args, **kwargs):
+    def create(self, request, *args, **kwargs):
         print("User registration initiated")
-        serializer = self.serializer_class(data=request.data)
+        serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             print("Serializer errors:", serializer.errors)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        email = serializer.validated_data['email']
-        if User.objects.filter(email=email).exists():
-            return Response({'email': 'This email is already registered.'}, status=status.HTTP_400_BAD_REQUEST)
+        user = serializer.save()
+        print(f"User created: {user.email}")
 
+        otp_token = self.generate_otp(user, 'registration')
         temp_token = str(uuid.uuid4())
-        self.generate_otp(request, temp_token, serializer.validated_data)
 
-        return Response({
-            'message': 'OTP sent to your email. Please verify to complete registration.',
-            'temp_token': temp_token,
-            'requires_otp': True
-        }, status=status.HTTP_200_OK)
-
-    def generate_otp(self, request, temp_token, user_data):
-        otp = ''.join(random.choices(string.digits, k=6))
-
-        # Store OTP and user data in session
         request.session[f'temp_registration_{temp_token}'] = {
-            'data': user_data,
-            'otp': otp,
+            'user_id': str(user.id),
             'expires_at': (timezone.now() + timedelta(minutes=5)).isoformat()
         }
-
-        # Log and send OTP
-        print(f"OTP for {user_data['email']}: {otp}")
-        send_mail(
-            subject="Your OTP Verification Code",
-            message=f"Your OTP is {otp}. It will expire in 5 minutes.",
-            from_email=None,  # uses DEFAULT_FROM_EMAIL
-            recipient_list=[user_data['email']],
-            fail_silently=False,
-        )
-
-
         print(f"Stored session token: temp_registration_{temp_token}")
 
         return Response({
@@ -170,64 +147,69 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
         return self.request.user
 
 
-class OTPVerificationView(APIView):
-    def generate_unique_username(self,first_name, last_name):
-        base = f"{first_name.lower()}{last_name.lower()}"
-        while True:
-            suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-            username = f"{base}{suffix}"
-            if not User.objects.filter(username=username).exists():
-                return username
+class OTPVerificationView(generics.GenericAPIView):
     serializer_class = OTPVerificationSerializer
     permission_classes = [AllowAny]
 
     def post(self, request):
-        print("otp verification request received")
-        serializer = self.serializer_class(data=request.data)
+        print("OTP verification request received")
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         temp_token = serializer.validated_data['temp_token']
         otp = serializer.validated_data['otp']
         otp_type = serializer.validated_data['type']
-        print("otp:",otp,"type",otp_type)
+        print(f"Verifying OTP: {otp} for type: {otp_type}")
 
         session_key = f'temp_registration_{temp_token}' if otp_type == 'registration' else f'temp_forgot_{temp_token}'
         session_data = request.session.get(session_key)
 
         if not session_data:
+            print("Invalid or expired session token")
             return Response({'error': 'Invalid or expired token'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if session_data['otp'] != otp:
+        try:
+            user = User.objects.get(id=session_data['user_id'])
+            print(f"User found: {user.email}")
+        except User.DoesNotExist:
+            print("User not found from session data")
+            return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            otp_token = OTPToken.objects.get(
+                user=user,
+                token=otp,
+                otp_type=otp_type.replace('-', '_'),
+                is_used=False
+            )
+        except OTPToken.DoesNotExist:
+            print("Invalid OTP provided")
             return Response({'error': 'Invalid OTP'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if not otp_token.is_valid():
+            print("OTP expired")
+            return Response({'error': 'OTP has expired'}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp_token.is_used = True
+        otp_token.save()
+        print("OTP verified and marked as used")
+
         if otp_type == 'registration':
-            user_data = session_data['data']
-            first_name = user_data.get('first_name', '')
-            last_name = user_data.get('last_name', '')
-            username = self.generate_unique_username(first_name, last_name)
-            print("Creating user with:", user_data)
-            user = User.objects.create_user(
-            username=username,
-            email=user_data['email'],
-            password=user_data['password']
-            )
             user.is_verified = True
             user.save()
-            token, _ = Token.objects.get_or_create(user=user)
+            token, created = Token.objects.get_or_create(user=user)
             login(request, user)
             del request.session[session_key]
+            print("User account verified and logged in")
 
             return Response({
                 'user': UserSerializer(user).data,
                 'token': token.key,
-                'message': 'Account verified and created successfully'
+                'message': 'Account verified successfully'
             })
-
-        elif otp_type == 'forgot-password':
-            # Implement forgot password OTP verification logic
-            # Only delete OTP session here; reset happens in ResetPasswordView
+        else:
+            print("OTP verified for forgot password flow")
             return Response({'message': 'OTP verified successfully'})
-
 
 
 class ForgotPasswordView(generics.GenericAPIView):
@@ -238,6 +220,9 @@ class ForgotPasswordView(generics.GenericAPIView):
         print("Forgot password request received")
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            print("Serializer errors:", serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         identifier = serializer.validated_data['email_or_phone']
         print(f"Identifier received: {identifier}")
@@ -258,32 +243,19 @@ class ForgotPasswordView(generics.GenericAPIView):
             print("User not found for forgot password")
             return Response({'error': 'User not found'}, status=status.HTTP_400_BAD_REQUEST)
 
+        otp_token = UserRegistrationView().generate_otp(user, 'forgot_password')
         temp_token = str(uuid.uuid4())
-        otp = ''.join(random.choices(string.digits, k=6))
-
-        # ✅ Store OTP and user ID in session
         request.session[f'temp_forgot_{temp_token}'] = {
-            'otp': otp,
             'user_id': str(user.id),
             'expires_at': (timezone.now() + timedelta(minutes=5)).isoformat()
         }
-
-        print(f"Forgot password OTP for {user.email}: {otp}")
-        send_mail(
-            subject="Your OTP for Password Reset",
-            message=f"Your OTP is {otp}. It will expire in 5 minutes.",
-            from_email=None,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
-
         print(f"Forgot password temp token created: {temp_token}")
+
         return Response({
             'message': 'OTP sent successfully',
-            'temp_token': temp_token,
-            'requires_otp': True
-        }, status=status.HTTP_200_OK)
-        
+            'requires_otp': True,
+            'temp_token': temp_token
+        })
 
 
 class ResetPasswordView(generics.GenericAPIView):
@@ -349,6 +321,85 @@ class SetDefaultAddressView(APIView):
         address.save()
 
         return Response({"message": "Default address updated", "address_id": str(address.id)}, status=200)
+
+class CreateAddressView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # Create the address
+        serializer = UserAddressSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()  # This will create a new address
+            return Response({"message": "Address created successfully", "address": serializer.data}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DeleteAddressView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        # Extracting the address_id from the request body
+        address_id = request.data.get("address_id")
+
+        if not address_id:
+            return Response({"error": "Address ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Find the address by the ID and ensure it's owned by the authenticated user
+            address = UserAddress.objects.get(id=address_id, user=request.user)
+        except UserAddress.DoesNotExist:
+            return Response({"error": "Address not found or does not belong to the user"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Delete the address
+        address.delete()
+
+        return Response({"message": "Address deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+class EditAddressView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request):
+        # Print the incoming request data for debugging
+        print(f"Request data: {request.data}")
+        
+        # Extract the address_id and address data from the request
+        address_id = request.data.get("address_id")
+        address_data = request.data.get("data")
+        
+        if not address_id:
+            return Response({"error": "Address ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not address_data:
+            return Response({"error": "Address data is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Fetch the address from the database
+            address = UserAddress.objects.get(id=address_id, user=request.user)
+        except UserAddress.DoesNotExist:
+            return Response({"error": "Address not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Print the address that will be updated
+        print(f"Address to be updated: {address}")
+
+        # Pass the extracted address data to the serializer to update it
+        # Since 'data' already contains the relevant information, we need to directly pass it
+        serializer = UserAddressSerializer(address, data=address_data, partial=True, context={'request': request})
+
+        if serializer.is_valid():
+            # Print the data that will be saved
+            print(f"Saving address with data: {serializer.validated_data}")
+            
+            # Save the updated address
+            serializer.save()
+
+            # Print confirmation of the successful save
+            print(f"Address updated successfully: {serializer.data}")
+            
+            return Response({"message": "Address updated successfully", "address": serializer.data}, status=status.HTTP_200_OK)
+        else:
+            # Print the serializer errors if validation fails
+            print(f"Serializer validation failed: {serializer.errors}")
+            
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class UserPaymentMethodViewSet(viewsets.ModelViewSet):
     serializer_class = UserPaymentMethodSerializer

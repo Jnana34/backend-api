@@ -1,8 +1,8 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    UserRegistrationView, UserLoginView, UserLogoutView, UserProfileView,
-    OTPVerificationView, ForgotPasswordView, ResetPasswordView,
+    UserRegistrationView, UserLoginView, UserLogoutView, UserProfileView,CreateAddressView,
+    OTPVerificationView, ForgotPasswordView, ResetPasswordView,EditAddressView,DeleteAddressView,
     AddressListView,SetDefaultAddressView, UserPaymentMethodViewSet,CsrfTokenView,CurrentUserView
 )
 urlpatterns = [
@@ -21,6 +21,9 @@ urlpatterns = [
     #info
     path('addresses/', AddressListView.as_view(), name='user-addresses'),
     path('addresses/set-default/', SetDefaultAddressView.as_view(), name='set-default-address'),
+    path('addresses/create/', CreateAddressView.as_view(), name='create_address'),
+    path('addresses/update/', EditAddressView.as_view(), name='edit_address'),
+    path('addresses/delete/', DeleteAddressView.as_view(), name='delete_address'),
     
     # User management
 ]
