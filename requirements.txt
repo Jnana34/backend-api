@@ -14,4 +14,3 @@ django-filter==23.5
 django-extensions==3.2.3
 gunicorn==21.2.0
 razorpay
-pip install --upgrade pip setuptools wheel
