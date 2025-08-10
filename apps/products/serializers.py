@@ -83,58 +83,81 @@ class ProductListSerializer(serializers.ModelSerializer):
     def get_rating(self, obj):
         return int(obj.rating)
 
-
 class ProductDetailSerializer(serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
     variants = ProductVariantSerializer(many=True, read_only=True)
     reviews = ProductReviewSerializer(many=True, read_only=True)
-    discount_percentage = serializers.ReadOnlyField()
-    is_in_stock = serializers.ReadOnlyField()
-    is_wishlisted = serializers.SerializerMethodField()
-    related_products = serializers.SerializerMethodField()
-    isOnSale = serializers.SerializerMethodField()
+    discountPercentage = serializers.ReadOnlyField(source='discount_percentage')
+    inStock = serializers.ReadOnlyField(source='is_in_stock')
     reviewCount = serializers.IntegerField(source='review_count', read_only=True)
-    price = serializers.SerializerMethodField()
-    original_price = serializers.SerializerMethodField()
+    originalPrice = serializers.SerializerMethodField()
+    isOnSale = serializers.SerializerMethodField()
+    isWishlisted = serializers.SerializerMethodField()
     rating = serializers.SerializerMethodField()
+    features = serializers.SerializerMethodField()
+    colors = serializers.SerializerMethodField()
+    sizes = serializers.SerializerMethodField()
+    price = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
-        fields = ['id', 'name', 'description', 'price', 'original_price', 'category',
-                  'images', 'variants', 'rating', 'reviewCount', 'stock_quantity',
-                  'sku', 'discount_percentage', 'is_in_stock', 'is_wishlisted',
-                  'reviews', 'related_products', 'created_at', 'isOnSale']
+        fields = [
+            'id', 'name', 'description', 'price', 'originalPrice', 'rating', 'reviewCount',
+            'inStock', 'isWishlisted', 'isOnSale', 'discountPercentage', 'features',
+            'images', 'colors', 'sizes', 'category', 'variants', 'reviews', 'created_at'
+        ]
+    def get_price(self, obj):
+        return float(obj.price)
 
-    def get_is_wishlisted(self, obj):
+    def get_originalPrice(self, obj):
+        return float(obj.original_price) if obj.original_price else None
+
+    def get_isOnSale(self, obj):
+        return bool(obj.original_price and obj.original_price > obj.price)
+
+    def get_isWishlisted(self, obj):
         user = self.context['request'].user
         if user.is_authenticated:
             return Wishlist.objects.filter(user=user, product=obj).exists()
         return False
 
-    def get_related_products(self, obj):
-        related = Product.objects.filter(
-            category=obj.category,
-            is_active=True
-        ).exclude(id=obj.id)[:4]
-
-        return ProductListSerializer(
-            related,
-            many=True,
-            context=self.context
-        ).data
-
-    def get_isOnSale(self, obj):
-        return bool(obj.original_price and obj.original_price > obj.price)
-
-    def get_price(self, obj):
-        return int(obj.price)
-
-    def get_original_price(self, obj):
-        return int(obj.original_price) if obj.original_price else None
-
     def get_rating(self, obj):
-        return int(obj.rating)
+        return float(obj.rating)
+
+    def get_features(self, obj):
+        # If features were stored in Product.features (JSONField or text list), just return that
+        return [
+            "7-day battery life",
+            "Water resistant up to 50m",
+            "Built-in GPS",
+            "Heart rate monitoring",
+            "Sleep tracking",
+            "100+ workout modes",
+        ]  # Replace with obj.features if stored
+
+    def get_colors(self, obj):
+        colors = obj.variants.filter(type='color', is_active=True)
+        return [
+            {
+                "id": color.value.lower().replace(" ", "-"),
+                "name": color.name,
+                "value": color.value,  # You could validate hex in model
+                "available": color.stock_quantity > 0
+            }
+            for color in colors
+        ]
+
+    def get_sizes(self, obj):
+        sizes = obj.variants.filter(type='size', is_active=True)
+        return [
+            {
+                "id": size.value.lower().replace(" ", "-"),
+                "name": size.name,
+                "available": size.stock_quantity > 0
+            }
+            for size in sizes
+        ]
 
 
 class WishlistSerializer(serializers.ModelSerializer):

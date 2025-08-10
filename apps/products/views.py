@@ -168,3 +168,19 @@ class FeaturedProductsAPIView(APIView):
             context={'request': request}
         )
         return Response(serializer.data)
+
+class FetchOneProductAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        product_id = request.data.get('id')
+        if not product_id:
+            return Response({"detail": "Product ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            product = Product.objects.get(id=product_id, is_active=True)
+        except Product.DoesNotExist:
+            return Response({"detail": "Product not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ProductDetailSerializer(product, context={'request': request})
+        return Response(serializer.data)
