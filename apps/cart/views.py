@@ -148,3 +148,21 @@ class CreateRazorpayOrderView(APIView):
         except Exception as e:
             print("[ERROR] Razorpay order creation failed:", str(e))
             return Response({"error": "Payment initiation failed"}, status=500)
+class ClearCartView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        print(f"[DEBUG] User {request.user} requested to clear their cart")
+
+        # Get or create user's cart
+        cart, _ = Cart.objects.get_or_create(user=request.user)
+
+        # Soft-delete all items (if you want to keep history) 
+        updated_count = CartItem.objects.filter(cart=cart, is_removed=False).update(is_removed=True)
+
+        print(f"[DEBUG] Cleared {updated_count} items from cart {cart.id}")
+
+        return Response(
+            {"detail": f"Cleared {updated_count} items from cart"},
+            status=status.HTTP_200_OK,
+        )

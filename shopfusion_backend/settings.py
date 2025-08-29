@@ -36,6 +36,7 @@ LOCAL_APPS = [
     'apps.orders',
     'apps.core',
     'apps.cart',
+    'apps.bot',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -81,7 +82,7 @@ DATABASES = {
         'USER': config('DB_USER', default='postgres'),
         'PASSWORD': config('DB_PASSWORD', default='Jnana34'),
         'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
+        'PORT': config('DB_PORT', default='5433'),
     }
 }
 
@@ -154,3 +155,4 @@ EMAIL_HOST_USER = 'jnanaranjan27@gmail.com'
 EMAIL_HOST_PASSWORD = 'zbuv ogxf xylw sdzb'
 
 REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+GEMINI_API_KEY = ''

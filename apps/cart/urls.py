@@ -7,4 +7,5 @@ urlpatterns = [
     path("update/", views.UpdateCartItemView.as_view(), name="cart-item-update"),
     path("delete/", views.RemoveCartItemView.as_view(), name="cart-item-remove"),  # changed path
     path("pay/", views.CreateRazorpayOrderView.as_view(), name="razorpay-gateway"),  # changed path
+    path("clear/", views.ClearCartView.as_view(), name="clear-cart"),
 ]
