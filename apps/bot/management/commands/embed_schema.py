@@ -7,7 +7,7 @@ from django.conf import settings
 from pgvector.django import vector
 import google.generativeai as genai
 
-genai.configure(api_key="AIzaSyDCBstpJuWJiIvufkVkSuxk_KYtFsb47wk")
+genai.configure(api_key=settings.API_KEY)
 
 
 DDL = """
