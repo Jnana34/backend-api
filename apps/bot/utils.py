@@ -7,7 +7,9 @@ import json
 import re
 from django.conf import settings
 
-DB_CONN = "dbname=shopfusion_db user=postgres password=Jnana34 host=localhost port=5433"
+POSTGRES_USER = settings.POSTGRES_USER
+
+DB_CONN = f"dbname=shopfusion_db user={settings.POSTGRES_USER} password={settings.POSTGRES_PASSWORD} host={settings.POSTGRES_HOST} port={settings.POSTGRES_PORT}"
 EMBED_MODEL = "models/text-embedding-004"
 MODEL_NAME = "gemini-2.0-flash"
 API_KEY = settings.GEMINI_API_KEY
